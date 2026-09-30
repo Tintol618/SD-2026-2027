@@ -49,6 +49,8 @@ Uma mensagem fora de ordem é recebida mas não entregue: fica na estrutura temp
 - Estrutura temporária → `TreeMap<Integer,String>`: o acesso é **pelo número** ("tenho a L+1?"), por isso um mapa indexado por N é o natural (`containsKey`/`remove`). O `TreeMap` mantém as chaves ordenadas, o que torna o estado legível nos logs; um `HashMap` também funcionaria.
 - Não é preciso guardar mais nada além de L: tudo o que está em `pending` é > L+1.
 
+**Porque não chega uma só estrutura.** Se não, ficava tudo misturado (mensagens entregues e mensagens recebidas mas ainda não entregues) e deixava de existir ordem nas mensagens entregues.
+
 ## 4.2 · Processamento — `processDeliveredMessages`
 
 ```java
@@ -74,6 +76,23 @@ return last;
 ```
 
 O `main` só trata da rede e do *parsing*; toda a lógica de ordenação está isolada neste método.
+
+**Porque devolve o último entregue e não N.** Numa cascata são entregues várias mensagens, por isso o novo L é a última entregue e não a que chegou. Ex.: L = 1, `pending = {3, 4}`, chega a 2 → devolve 4 (e não 2). O servidor responde `ok,4` e a próxima esperada é a 5 (`waitingfor` pede sempre L+1, o próximo esperado).
+
+**Quando o valor devolvido é igual ao L de entrada.** Quando não se entrega nada:
+- duplicado (N ≤ L ou N já guardada): é ignorado. Ex.: L = 4, chega a 3 → devolve 4;
+- adiantada (N > L+1): é guardada mas não entregue. Ex.: L = 2, chega a 5 → devolve 2.
+
+**Quantas mensagens entrega uma cascata.** A cascata continua enquanto a mensagem seguinte estiver na estrutura temporária, e para no primeiro número que falta. Depende de quantas mensagens consecutivas já estavam guardadas. Com L = 1 e chega a 2:
+- `pending = {3, 4}` → entrega 3 mensagens (2, 3, 4), L = 4;
+- `pending = {3, 4, 5, 6}` → entrega 5 mensagens, L = 6;
+- `pending = {3, 5}` → entrega 2 mensagens (2, 3), L = 3; a 5 fica guardada porque falta a 4.
+
+**Resistência a erros.** Com L = 4:
+- `3,mundo` → `dup,3`;
+- `abc` (mal formada) → `waitingfor,5`.
+
+Em ambos os casos fica tudo igual: L, lista de receção e estrutura temporária não mudam.
 
 ## 4.3 · Verificação
 
@@ -114,6 +133,15 @@ Igual às quatro primeiras linhas da tabela acima. Interpretação: a 3 e a 4 s�
 | Datagramas enviados no total | 8 | 5 |
 
 Em geral, na UDP01 o custo é igual ao número de mensagens que chegam adiantadas; na UDP02 é zero (enquanto as mensagens não se perdem).
+
+### Custo de retransmissão com 1, 3, 4, 5, 6, 2
+
+| | UDP01 | UDP02 |
+|---|---|---|
+| Retransmissões | 4 (3, 4, 5, 6) | 0 |
+| Datagramas enviados no total | 10 | 6 |
+
+Na UDP02 não é preciso reenviar nenhuma mensagem porque o servidor guarda em memória as mensagens que chegam fora de ordem.
 
 ### Crescimento não limitado da estrutura temporária (CA5)
 
