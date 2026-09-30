@@ -21,7 +21,10 @@ public class UDPClient {
                 if (line.equals("/auto"))   { manual = false; System.out.println("Modo automático."); continue; }
                 if (line.equals("/manual")) { manual = true;  System.out.println("Modo manual."); continue; }
                 if (line.isEmpty()) continue;
-                String text = manual ? line : nextNumber++ + "," + line;
+                String text = manual ? line : nextNumber + "," + line;
+                int n = parseNumber(text);
+                // o modo automático continua a seguir ao maior número já enviado (também em modo manual)
+                if (n >= 1) nextNumber = Math.max(nextNumber, n + 1);
                 byte[] m = text.getBytes();
                 DatagramPacket request = new DatagramPacket(m, m.length, aHost, serverPort);
                 aSocket.send(request);
@@ -29,7 +32,11 @@ public class UDPClient {
                 DatagramPacket reply = new DatagramPacket(buffer, buffer.length);
                 aSocket.receive(reply);
                 String answer = new String(reply.getData(), 0, reply.getLength());
-                if (answer.startsWith("ok,")) {
+                if (n < 1) {
+                    // mal formada: o servidor responde waitingfor mas não a guarda
+                    System.out.println("Enviado: " + text + " | IGNORADA (mal formada, use <N>,<mensagem> com N >= 1)"
+                            + " -> o servidor espera a mensagem " + answer.substring(answer.indexOf(',') + 1));
+                } else if (answer.startsWith("ok,")) {
                     System.out.println("Enviado: " + text + " | ENTREGUE -> o servidor já entregou até à mensagem "
                             + answer.substring("ok,".length()));
                 } else if (answer.startsWith("waitingfor,")) {
@@ -45,5 +52,16 @@ public class UDPClient {
         } catch (SocketException e) { System.out.println("Socket: " + e.getMessage());
         } catch (IOException e)     { System.out.println("IO: " + e.getMessage());
         } finally { if (aSocket != null) aSocket.close(); }
+    }
+
+    // Mesmas regras do servidor: número antes da primeira vírgula, >= 1; devolve -1 se mal formada.
+    static int parseNumber(String text) {
+        int comma = text.indexOf(',');
+        if (comma <= 0) return -1;
+        try {
+            return Integer.parseInt(text.substring(0, comma).trim());
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 }
