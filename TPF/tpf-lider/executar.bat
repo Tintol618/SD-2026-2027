@@ -1,7 +1,7 @@
 @echo off
 rem ============================================================
 rem  tpf-lider - compila (Maven) e arranca o LeaderBot
-rem  Uso: executar.bat <guildId>      (ou define TPF_GUILD_ID)
+rem  Uso: executar.bat [guildId]      (opcional se o bot estiver num so servidor)
 rem       executar.bat --teste        (valida os comandos sem Discord)
 rem  O token vem de DISCORD_TOKEN ou de token.txt nesta pasta.
 rem ============================================================
