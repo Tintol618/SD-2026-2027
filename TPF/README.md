@@ -58,12 +58,12 @@ java -jar target/tpf-lider.jar --teste  # valida os comandos sem ligar ao Discor
 No PowerShell:
 ```
 $env:DISCORD_TOKEN = "<token do bot>"
-java -jar target/tpf-lider.jar <ID do servidor>
+java -jar target/tpf-lider.jar [ID do servidor]    # sem ID: usa o único servidor onde o bot está
 ```
 
 Ou com o token em `token.txt`:
 ```
-executar.bat <ID do servidor>
+executar.bat [ID do servidor]
 ```
 
 Quando o bot fica online, regista os comandos **no servidor de teste** (*guild commands*, disponíveis logo) e escreve em `eventos-lider.txt`:

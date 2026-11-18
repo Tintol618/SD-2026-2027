@@ -43,19 +43,22 @@ public class LeaderBot extends ListenerAdapter {
         }
         String token = lerToken();
         String guild = args.length > 0 ? args[0] : System.getenv("TPF_GUILD_ID");
-        if (token == null || guild == null || guild.isBlank()) {
-            System.out.println("Uso: LeaderBot <guildId>");
+        if (token == null) {
+            System.out.println("Uso: LeaderBot [guildId]");
             System.out.println("  O token do bot vem da variável de ambiente DISCORD_TOKEN ou do ficheiro token.txt");
-            System.out.println("  (nunca no repositório). O guildId é o ID do servidor de teste (ou TPF_GUILD_ID).");
+            System.out.println("  (nunca no repositório). O guildId é o ID do servidor de teste (ou TPF_GUILD_ID);");
+            System.out.println("  se for omitido e o bot estiver num só servidor, usa esse.");
             System.exit(2);
         }
-        long guildId;
-        try {
-            guildId = Long.parseLong(guild.trim());
-        } catch (NumberFormatException e) {
-            System.out.println("guildId inválido: " + guild);
-            System.exit(2);
-            return;
+        long guildId = 0;
+        if (guild != null && !guild.isBlank()) {
+            try {
+                guildId = Long.parseLong(guild.trim());
+            } catch (NumberFormatException e) {
+                System.out.println("guildId inválido: " + guild);
+                System.exit(2);
+                return;
+            }
         }
 
         // GUILD_MESSAGES para receber as mensagens dos canais; MESSAGE_CONTENT (intent privilegiado,
@@ -65,9 +68,18 @@ public class LeaderBot extends ListenerAdapter {
                 .build();
         jda.awaitReady();
 
-        Guild g = jda.getGuildById(guildId);
+        Guild g;
+        if (guildId != 0) {
+            g = jda.getGuildById(guildId);
+        } else if (jda.getGuilds().size() == 1) {
+            g = jda.getGuilds().get(0);       // sem guildId: o único servidor onde o bot está
+        } else {
+            System.out.println("O bot está em " + jda.getGuilds().size() + " servidores; indica o guildId: "
+                    + jda.getGuilds().stream().map(x -> x.getName() + " = " + x.getId()).toList());
+            g = null;
+        }
         if (g == null) {
-            System.out.println("O bot não está no servidor " + guildId + ". Usa o URL de convite do README.");
+            System.out.println("Servidor não encontrado. Convida o bot com o URL do README e indica o guildId.");
             jda.shutdown();
             System.exit(3);
             return;
