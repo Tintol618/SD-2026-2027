@@ -1,0 +1,20 @@
+# segredos: nunca no repositório
+token.txt
+*.token
+.env
+master.key
+*.key
+chave.der
+
+# artefactos de compilação
+target/
+out/
+*.class
+
+# dados gerados ao correr o líder e as réplicas
+eventos-*.txt
+registos.log
+catalogo.txt
+replicas.txt
+selados/
+dados-*/
