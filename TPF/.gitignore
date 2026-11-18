@@ -18,3 +18,6 @@ catalogo.txt
 replicas.txt
 selados/
 dados-*/
+
+# registos de execução
+*.log
