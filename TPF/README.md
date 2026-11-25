@@ -114,6 +114,10 @@ Todos os eventos ficam em `eventos-lider.txt` (`instante;evento;detalhe`): `ARRA
 | `Verificar` | `--verificar` e `--simular` |
 | `ChunkCryptoTeste` | testes do registo, do chunk e da cifra (`--teste`) |
 
+**Um líder por pasta.** O Discord entrega cada comando a todas as sessões do bot. Por isso, o líder tranca `lider.lock` ao arrancar, e um segundo líder na mesma pasta recusa arrancar («já há um líder a correr nesta pasta»). Antes de usar o `executar.bat`, fecha qualquer outro líder.
+
+Os resultados dos ensaios estão em [RELATORIO-E2-02.md](RELATORIO-E2-02.md).
+
 ### Parâmetros
 
 | Parâmetro | Omissão | Alterar com |
