@@ -54,6 +54,7 @@ final class Arquivo {
     // recolocação no chunk aberto dos registos que ficaram por selar
     static Arquivo abrir(Eventos ev) throws IOException, GeneralSecurityException {
         Wire.validar();
+        trancar();
         boolean[] criada = {false};
         byte[] mk = MasterKey.carregarOuCriar(Wire.MASTER_KEY, criada);
         if (criada[0]) ev.evento("CHAVE", "master.key gerada (32 bytes de SecureRandom, leitura só para o dono)");
@@ -103,6 +104,28 @@ final class Arquivo {
                 + a.ultimoSelado + ";porSelar=" + pendentes + ";chunkMax=" + Wire.CHUNK_MAX_BYTES + ";pad="
                 + Wire.PAD_BYTES + ";selagemMs=" + Wire.SELAGEM_MS);
         return a;
+    }
+
+    // Dois líderes na mesma pasta escreveriam o mesmo LSN duas vezes no registos.log (o Discord entrega
+    // cada comando a todas as sessões do bot). O trinco do SO é libertado sozinho quando o processo termina,
+    // mesmo que morra sem paragem ordenada, por isso nunca fica preso.
+    private static FileChannel trincoCanal;
+    private static java.nio.channels.FileLock trinco;
+
+    private static synchronized void trancar() throws IOException {
+        if (trinco != null) return;
+        trincoCanal = FileChannel.open(Wire.TRINCO, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
+        try {
+            trinco = trincoCanal.tryLock();
+        } catch (java.nio.channels.OverlappingFileLockException e) {
+            trinco = null;
+        }
+        if (trinco == null) {
+            trincoCanal.close();
+            trincoCanal = null;
+            throw new IOException("já há um líder a correr nesta pasta (" + Wire.TRINCO.toAbsolutePath()
+                    + " está trancado). Fecha-o antes de arrancar outro.");
+        }
     }
 
     // lê registos.log e confirma que os LSN são 1, 2, 3, … Uma última linha incompleta (falha a meio de

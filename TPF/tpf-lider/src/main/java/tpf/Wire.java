@@ -27,6 +27,8 @@ final class Wire {
     static final Path MASTER_KEY = Paths.get(System.getProperty("tpf.masterKey", "master.key"));
     static final Path REGISTOS = Paths.get("registos.log");
     static final Path SELADOS = Paths.get("selados");
+    // trinco exclusivo: só um líder de cada vez pode usar esta pasta
+    static final Path TRINCO = Paths.get("lider.lock");
 
     static void validar() {
         if (CHUNK_MAX_BYTES < 64) throw new IllegalArgumentException("tpf.chunkMaxBytes tem de ser >= 64");
