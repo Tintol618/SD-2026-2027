@@ -21,3 +21,7 @@ dados-*/
 
 # registos de execução
 *.log
+
+# trinco do líder (só um líder por pasta)
+*.lock
+ensaio-*/

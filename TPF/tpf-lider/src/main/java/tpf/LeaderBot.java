@@ -25,21 +25,36 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-// Líder do arquivo (Sprint E2-01): bot Discord que recebe e encaminha todos os comandos da especificação,
-// valida os argumentos e responde com uma mensagem provisória. Nenhuma funcionalidade do arquivo está
-// implementada ainda (registo, cifra, réplicas e recuperação chegam nos sprints seguintes).
+// Líder do arquivo: bot Discord com os 7 comandos da especificação.
+//   Sprint E2-01: validação dos argumentos e respostas provisórias.
+//   Sprint E2-02: caminho de escrita local. /registar, as mensagens em #arquivo e a /rajada passam todos por
+//   Arquivo.registar (LSN, registos.log com fsync, chunk aberto, selagem cifrada em selados/).
+//   /estado, /config, /recuperar, /replica-token e /replica-remover mantêm a resposta provisória.
 //
-// Uso: LeaderBot <guildId>        (token em DISCORD_TOKEN ou no ficheiro token.txt; ver README.md)
-//      LeaderBot --teste          (verifica a validação dos comandos sem ligar ao Discord)
+// Uso: LeaderBot [guildId]             (token em DISCORD_TOKEN ou no ficheiro token.txt; ver README.md)
+//      LeaderBot --teste               (validação dos comandos, chunk e cifra, sem Discord)
+//      LeaderBot --verificar           (abre todos os chunks de selados/ e compara-os com registos.log)
+//      LeaderBot --simular <n> <ms>    (n registos sintéticos pelo caminho de escrita, sem Discord)
 public class LeaderBot extends ListenerAdapter {
     static final String CANAL = System.getProperty("tpf.canal", "arquivo");
     static final String PAPEL_ADMIN = System.getProperty("tpf.papel", "admin-arquivo");
     static final Set<String> SO_ADMIN = Set.of("config", "replica-token", "replica-remover", "rajada");
     static final Path EVENTOS = Paths.get("eventos-lider.txt");
 
-    public static void main(String[] args) throws InterruptedException {
+    static Arquivo arquivo;
+
+    public static void main(String[] args) throws Exception {
         if (args.length == 1 && args[0].equals("--teste")) {
-            System.exit(ComandosTeste.correr() ? 0 : 1);
+            boolean a = ComandosTeste.correr();
+            boolean b = ChunkCryptoTeste.correr();
+            System.exit(a && b ? 0 : 1);
+        }
+        if (args.length == 1 && args[0].equals("--verificar")) {
+            System.exit(Verificar.verificar() ? 0 : 1);
+        }
+        if (args.length == 3 && args[0].equals("--simular")) {
+            Verificar.simular(Long.parseLong(args[1]), Long.parseLong(args[2]));
+            System.exit(0);
         }
         String token = lerToken();
         String guild = args.length > 0 ? args[0] : System.getenv("TPF_GUILD_ID");
@@ -60,6 +75,16 @@ public class LeaderBot extends ListenerAdapter {
                 return;
             }
         }
+
+        // o arquivo abre antes do Discord: sem master.key válida ou com registos.log inconsistente não se arranca
+        try {
+            arquivo = Arquivo.abrir(LeaderBot::evento);
+        } catch (Exception e) {
+            evento("ERRO", "arranque recusado: " + e.getMessage());
+            System.exit(4);
+            return;
+        }
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> arquivo.fechar(), "paragem"));
 
         // GUILD_MESSAGES para receber as mensagens dos canais; MESSAGE_CONTENT (intent privilegiado,
         // ativado no Developer Portal) para ler o seu conteúdo
@@ -140,26 +165,77 @@ public class LeaderBot extends ListenerAdapter {
             event.reply("⛔ `/" + nome + "` é só para membros com o papel **" + PAPEL_ADMIN + "**.").setEphemeral(true).queue();
             return;
         }
+        String resposta;
         try {
-            String resposta = tratar(nome, sub, opcoes);
-            evento("COMANDO", "/" + nome + (sub != null ? " " + sub : "") + " " + opcoes + " de " + quem);
-            event.reply(resposta).queue();
+            resposta = tratar(nome, sub, opcoes);
         } catch (IllegalArgumentException e) {
-            evento("INVALIDO", "/" + nome + (sub != null ? " " + sub : "") + " " + opcoes + " de " + quem + ": " + e.getMessage());
+            evento("INVALIDO", "/" + nome + (sub != null ? " " + sub : "") + " " + mostrar(opcoes) + " de " + quem + ": " + e.getMessage());
             event.reply("❌ " + e.getMessage()).setEphemeral(true).queue();
+            return;
+        }
+        evento("COMANDO", "/" + nome + (sub != null ? " " + sub : "") + " " + mostrar(opcoes) + " de " + quem);
+        String canal = event.getChannel().getName();
+        switch (nome) {
+            case "registar":
+                try {
+                    // a resposta só sai depois do fsync: o LSN que o utilizador vê já está no disco
+                    Registo r = arquivo.registar(quem, canal, opcoes.get("texto").trim());
+                    event.reply("✅ Registado com **LSN " + r.lsn() + "**.").queue();
+                } catch (IOException e) {
+                    event.reply("❌ Não foi possível registar: " + e.getMessage()).setEphemeral(true).queue();
+                }
+                break;
+            case "rajada": {
+                long n = Long.parseLong(opcoes.get("n").trim());
+                long intervalo = Long.parseLong(opcoes.get("intervalo-ms").trim());
+                event.reply("⏳ `/rajada`: a injetar " + n + " registos sintéticos com " + intervalo + " ms de intervalo…").queue();
+                rajada(n, intervalo, quem, canal, event.getChannel());
+                break;
+            }
+            default:
+                event.reply(resposta).queue();
         }
     }
 
-    // mensagens enviadas ao canal #arquivo (as de bots, incluindo as do próprio, e as de outros canais são ignoradas)
+    // a rajada corre numa thread própria para não bloquear a JDA; cada registo passa por Arquivo.registar,
+    // tal como um /registar, e no fim publica-se um resumo no canal
+    static void rajada(long n, long intervalo, String autor, String canal,
+                       net.dv8tion.jda.api.entities.channel.middleman.MessageChannel destino) {
+        Thread t = new Thread(() -> {
+            long primeiro = -1, ultimo = -1, inicio = System.currentTimeMillis();
+            try {
+                for (long k = 1; k <= n; k++) {
+                    Registo r = arquivo.registar(autor, canal, Verificar.sintetico(k, n));
+                    if (primeiro < 0) primeiro = r.lsn();
+                    ultimo = r.lsn();
+                    if (intervalo > 0) Thread.sleep(intervalo);
+                }
+                long ms = System.currentTimeMillis() - inicio;
+                evento("RAJADA", "n=" + n + ";lsn=" + primeiro + ".." + ultimo + ";ms=" + ms);
+                destino.sendMessage("✅ `/rajada` concluída: " + n + " registos, **LSN " + primeiro + ".." + ultimo
+                        + "**, em " + ms + " ms.").queue();
+            } catch (IOException | InterruptedException e) {
+                evento("ERRO", "rajada interrompida em LSN " + ultimo + ": " + e.getMessage());
+                destino.sendMessage("❌ `/rajada` interrompida depois do LSN " + ultimo + ": " + e.getMessage()).queue();
+            }
+        }, "rajada");
+        t.start();
+    }
+
+    // mensagens enviadas ao canal #arquivo: registadas pelo mesmo caminho de /registar
+    // (as de bots, incluindo as do próprio, e as de outros canais são ignoradas)
     @Override
     public void onMessageReceived(MessageReceivedEvent event) {
         if (!event.isFromGuild() || event.getAuthor().isBot() || event.isWebhookMessage()) return;
         if (!event.getChannel().getName().equals(CANAL)) return;
         String texto = event.getMessage().getContentRaw();
         if (texto.isBlank()) return;   // só anexos ou embeds: nada para registar
-        evento("MENSAGEM", "#" + CANAL + " de " + event.getAuthor().getName() + ": " + resumo(texto, 80));
-        event.getMessage().reply("📝 Mensagem detetada em #" + CANAL + ": «" + resumo(texto, 200)
-                + "» — registo ainda não implementado").mentionRepliedUser(false).queue();
+        try {
+            Registo r = arquivo.registar(event.getAuthor().getName(), CANAL, texto);
+            event.getMessage().reply("📝 Registado com **LSN " + r.lsn() + "**.").mentionRepliedUser(false).queue();
+        } catch (IOException e) {
+            event.getMessage().reply("❌ Não foi possível registar: " + e.getMessage()).mentionRepliedUser(false).queue();
+        }
     }
 
     static boolean isAdmin(Member m) {
@@ -174,7 +250,7 @@ public class LeaderBot extends ListenerAdapter {
             case "registar": {
                 String texto = obrigatorio(o, "texto").trim();
                 if (texto.isEmpty()) throw new IllegalArgumentException("`/registar`: o texto não pode estar vazio.");
-                return "`/registar` recebido: texto=«" + resumo(texto, 200) + "» — ainda não implementado";
+                return "`/registar` recebido: texto=«" + resumo(texto, 200) + "»";
             }
             case "estado":
                 return "`/estado` recebido — ainda não implementado";
@@ -201,7 +277,7 @@ public class LeaderBot extends ListenerAdapter {
             case "rajada": {
                 long n = inteiro(o, "n", 1, 100_000);
                 long intervalo = inteiro(o, "intervalo-ms", 0, 60_000);
-                return "`/rajada` recebido: n=" + n + ", intervaloMs=" + intervalo + " — ainda não implementado";
+                return "`/rajada` recebido: n=" + n + ", intervaloMs=" + intervalo;
             }
             default:
                 throw new IllegalArgumentException("comando desconhecido: /" + nome);
@@ -227,6 +303,13 @@ public class LeaderBot extends ListenerAdapter {
                     + min + ", " + (max == Long.MAX_VALUE ? "∞" : String.valueOf(max)) + "].");
         }
         return x;
+    }
+
+    // opções para eventos-lider.txt: o texto a registar não fica em claro nos eventos, só o seu tamanho
+    static String mostrar(Map<String, String> o) {
+        Map<String, String> m = new LinkedHashMap<>(o);
+        m.computeIfPresent("texto", (k, v) -> "<" + v.getBytes(StandardCharsets.UTF_8).length + " bytes>");
+        return m.toString();
     }
 
     static String resumo(String s, int max) {

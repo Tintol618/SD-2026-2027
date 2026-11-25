@@ -9,7 +9,7 @@
     <version>0.1.0</version>
     <packaging>jar</packaging>
     <name>tpf-lider</name>
-    <description>Líder do arquivo distribuído zero-knowledge: bot Discord (Sprint E2-01)</description>
+    <description>Líder do arquivo distribuído zero-knowledge: bot Discord e caminho de escrita local (Sprints E2-01 e E2-02)</description>
 
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
